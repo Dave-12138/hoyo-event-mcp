@@ -7,7 +7,7 @@
 - 对外只暴露一个工具：`list_events`。
 - 工具返回中文文本和 `structuredContent`；默认只返回进行中的活动，`includeUpcoming` / `includeEnded` 扩展时间范围，`game` 限定游戏。
 - 三款游戏并发抓取，进程内缓存筛选结果，默认十分钟；刷新失败时回退到上次缓存并在文本中说明。
-- `.github/workflows/publish-dist.yml` 在推送到 `main` 后构建，并强制推送到孤儿分支 `dist`；`dist` 分支用于 `npx -y github:<repo>#dist`。
+- `.github/workflows/publish-dist.yml` 在推送到 `main` 后构建，并强制推送到孤儿分支 `dist`；`dist` 分支用于 `npx -y github:Dave-12138/hoyo-event-mcp#dist`。
 
 ## Commands
 

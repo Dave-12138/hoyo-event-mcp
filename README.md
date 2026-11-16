@@ -15,10 +15,10 @@
 ### 通过 npx 启动
 
 ```bash
-npx -y github:<repo>#dist
+npx -y github:Dave-12138/hoyo-event-mcp#dist
 ```
 
-把 `<repo>` 换成仓库地址，例如 `用户名/hoyo-event`。`dist` 分支由 GitHub Actions 构建并发布。
+仓库地址是 `https://github.com/Dave-12138/hoyo-event-mcp`。`dist` 分支由 GitHub Actions 构建并发布。
 
 MCP 客户端配置：
 
@@ -27,7 +27,7 @@ MCP 客户端配置：
   "mcpServers": {
     "hoyo-event": {
       "command": "npx",
-      "args": ["-y", "github:<repo>#dist"]
+      "args": ["-y", "github:Dave-12138/hoyo-event-mcp#dist"]
     }
   }
 }
@@ -38,7 +38,7 @@ MCP 客户端配置：
 ### 通过 npm 全局安装
 
 ```bash
-npm i -g github:<repo>#dist
+npm i -g github:Dave-12138/hoyo-event-mcp#dist
 ```
 
 安装后可以用 `hoyo-event` 命令启动：
