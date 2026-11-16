@@ -1,0 +1,39 @@
+{
+  "name": "hoyo-event",
+  "version": "0.1.0",
+  "description": "抓取米哈游官方公告并筛选限时玩法活动的 MCP 服务器",
+  "type": "module",
+  "bin": {
+    "hoyo-event": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run typecheck && vite build",
+    "dev": "npm run build && node dist/index.js",
+    "watch": "vite build --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --import tsx --test test/config.test.mjs test/filter.test.mjs test/announcements.test.mjs test/integration.test.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/node": "^26.6.6",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.1.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
