@@ -196,6 +196,60 @@ export function buildFixtures(now = Date.now()) {
     };
 }
 
+function contentEntry(annId, title, content) {
+    return { ann_id: annId, title, subtitle: "", banner: "", content, lang: "zh-cn", remind_text: "" };
+}
+
+export function buildContentFixtures() {
+    return {
+        genshin: {
+            retcode: 0,
+            message: "OK",
+            data: {
+                list: [
+                    contentEntry(
+                        1001,
+                        "「星辉庆典」活动：完成挑战获取原石",
+                        '<p>〓活动时间〓</p><p>2026/11/01 10:00 ~ 2026/11/21 03:59</p><p>〓活动说明〓</p><p>在星辉庆典中完成挑战，获取原石。</p><p><img src="https://example.com/genshin-1001-reward.png"></p>'
+                    )
+                ],
+                pic_list: []
+            }
+        },
+        hsr: {
+            retcode: 0,
+            message: "OK",
+            data: {
+                list: [],
+                pic_list: [
+                    contentEntry(
+                        2001,
+                        "「剧场版绒绒号：欢闹厨房」：经营甜品店、完成漫画稿，获取自塑尘脂等奖励！",
+                        "<h1>剧场版绒绒号：欢闹厨房</h1><p>经营「神的甜品店」，完成漫画稿。</p><ul><li>自塑尘脂</li><li>星琼</li></ul>"
+                    ),
+                    contentEntry(
+                        2002,
+                        "「星际和平盛典：成名之路」：击败强敌，获取命运的足迹等奖励！",
+                        "<p>击败强敌，赢得欢呼与掌声。</p>"
+                    )
+                ]
+            }
+        },
+        zzz: {
+            retcode: 0,
+            message: "OK",
+            data: {
+                list: [contentEntry(3001, "「修复吧！漂流画集」活动说明", "<p>修复漂流画集，完成拼图。</p>")],
+                pic_list: [
+                    contentEntry(3011, "「无关公告」活动说明", "<p>不应返回的正文。</p>"),
+                    contentEntry(3011, "「怪奇诡屋惊魂记」活动说明", "<p>驱赶「诡屋」中出现的敌人。</p>"),
+                    contentEntry(3012, "「天使应援大作战」活动说明", "<p>为选手应援，赢取菲林。</p>")
+                ]
+            }
+        }
+    };
+}
+
 export function emptyPayload() {
     return { retcode: 0, message: "OK", data: { list: [], pic_list: [] } };
 }
@@ -208,10 +262,13 @@ export function malformedPayload() {
     return { retcode: 0, message: "OK", data: {} };
 }
 
-const GAME_BY_PATH = {
-    "/common/hk4e_cn/announcement/api/getAnnList": "genshin",
-    "/common/hkrpg_cn/announcement/api/getAnnList": "hsr",
-    "/common/nap_cn/announcement/api/getAnnList": "zzz"
+const ROUTES = {
+    "/common/hk4e_cn/announcement/api/getAnnList": { game: "genshin", kind: "list" },
+    "/common/hkrpg_cn/announcement/api/getAnnList": { game: "hsr", kind: "list" },
+    "/common/nap_cn/announcement/api/getAnnList": { game: "zzz", kind: "list" },
+    "/common/hk4e_cn/announcement/api/getAnnContent": { game: "genshin", kind: "content" },
+    "/common/hkrpg_cn/announcement/api/getAnnContent": { game: "hsr", kind: "content" },
+    "/common/nap_cn/announcement/api/getAnnContent": { game: "zzz", kind: "content" }
 };
 
 export async function startMockServer(options = {}) {
@@ -219,11 +276,18 @@ export async function startMockServer(options = {}) {
     const state = {
         now,
         fixtures: buildFixtures(now),
+        contents: buildContentFixtures(),
         modes: {
             genshin: "normal",
             hsr: "normal",
             zzz: "normal",
             ...(options.modes ?? {})
+        },
+        contentModes: {
+            genshin: "normal",
+            hsr: "normal",
+            zzz: "normal",
+            ...(options.contentModes ?? {})
         },
         delayMs: options.delayMs ?? 500,
         requests: []
@@ -231,15 +295,18 @@ export async function startMockServer(options = {}) {
 
     const server = createServer((request, response) => {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
-        const game = GAME_BY_PATH[url.pathname];
+        const route = ROUTES[url.pathname];
         state.requests.push({ method: request.method, pathname: url.pathname, search: url.search, headers: request.headers });
-        if (!game) {
+        if (!route) {
             response.writeHead(404, { "content-type": "application/json; charset=utf-8" });
             response.end(JSON.stringify({ message: "not found" }));
             return;
         }
 
-        const mode = state.modes[game];
+        const game = route.game;
+        const isContent = route.kind === "content";
+        const mode = isContent ? state.contentModes[game] : state.modes[game];
+        const fixture = isContent ? state.contents[game] : state.fixtures[game];
         const sendJson = (body) => {
             if (response.destroyed || response.writableEnded) {
                 return;
@@ -249,7 +316,7 @@ export async function startMockServer(options = {}) {
         };
 
         if (mode === "slow") {
-            const timer = setTimeout(() => sendJson(state.fixtures[game]), state.delayMs);
+            const timer = setTimeout(() => sendJson(fixture), state.delayMs);
             timer.unref?.();
             return;
         }
@@ -270,7 +337,7 @@ export async function startMockServer(options = {}) {
             sendJson(emptyPayload());
             return;
         }
-        sendJson(state.fixtures[game]);
+        sendJson(fixture);
     });
 
     server.listen(0, "127.0.0.1");

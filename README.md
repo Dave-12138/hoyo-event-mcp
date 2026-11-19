@@ -70,9 +70,7 @@ npm i -g github:Dave-12138/hoyo-event-mcp#dist
 | `includeUpcoming` | boolean | 否 | `false` | 为 `true` 时加入尚未开始的活动。 |
 | `includeEnded` | boolean | 否 | `false` | 为 `true` 时加入已经结束的活动。 |
 
-返回文本摘要和 `structuredContent`。文本按游戏分组展示活动表格；列表为空时给出明确说明。
-
-`structuredContent` 顶层字段：
+工具返回 JSON 文本和 `structuredContent`，两者的内容相同。JSON 顶层字段：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -80,9 +78,11 @@ npm i -g github:Dave-12138/hoyo-event-mcp#dist
 | `total` | 返回的活动数量。 |
 | `counts` | 每款游戏返回的活动数量。 |
 | `updatedAt` | 本次结果中最旧的抓取时间，格式为 `YYYY-MM-DD HH:mm:ss`；没有可用数据时为 `null`。 |
+| `timezone` | 时间字段使用的时区标签，例如 `UTC+8`。 |
 | `stale` | 是否有游戏使用了过期缓存。 |
 | `failedGames` | 抓取失败且没有可用缓存的游戏。 |
-| `warnings` | 抓取失败、缓存回退等中文提示。 |
+| `warnings` | 抓取失败、正文获取失败、缓存回退等中文提示。 |
+| `message` | 只在活动列表为空时出现，说明结果为空的原因和可用参数。 |
 | `events` | 活动列表。 |
 
 `events` 中每一项的字段：
@@ -95,10 +95,15 @@ npm i -g github:Dave-12138/hoyo-event-mcp#dist
 | `startAt` | string | 开始时间，格式为 `YYYY-MM-DD HH:mm:ss`。 |
 | `endAt` | string | 结束时间，格式为 `YYYY-MM-DD HH:mm:ss`。 |
 | `daysLeft` | integer | 距结束的整数天数，向上取整；已结束为负数。 |
-| `annId` | integer | 公告 ID，用于后续查正文。 |
+| `status` | string | `active` 进行中、`upcoming` 未开始、`ended` 已结束。 |
+| `annId` | integer | 公告 ID，用于去重和匹配正文。 |
 | `source` | string | `list` 表示纯文本公告，`pic` 表示图文资讯。 |
+| `content` | string \| null | 公告正文纯文本，保留段落和列表换行；没有取到正文时为 `null`。 |
+| `images` | string[] | 正文中的图片地址，按出现顺序去重。 |
 
 时间按公告时区的本地时间输出，默认是 UTC+8。`daysLeft` 按真实时间差计算，与显示时的时区无关。
+
+公告接口没有提供按 `ann_id` 访问的正文网页地址，所以每条活动直接带上正文纯文本和图片地址，不再给出跳转链接。
 
 ## 数据源
 
@@ -109,6 +114,8 @@ npm i -g github:Dave-12138/hoyo-event-mcp#dist
 | 原神 | `https://hk4e-ann-api.mihoyo.com` | `data.list` 中 `tag_label` 为 `活动` 的条目。 |
 | 崩铁 | `https://hkrpg-ann-api.mihoyo.com` | 只读 `data.pic_list`；`data.list` 没有版本活动，直接跳过。 |
 | 绝区零 | `https://announcement-api.mihoyo.com` | `data.list` 中 `tag_label` 为 `活动公告` 的条目，以及 `data.pic_list` 中标题含 `活动说明` 的条目。 |
+
+每款游戏还会请求同一根地址下的 `getAnnContent` 接口，参数与列表接口相同。正文按 `ann_id` 和标题匹配到筛选后的活动：同一 `ann_id` 出现在多条公告时，标题相同的那条才采用。
 
 接口路径和默认请求参数写在 `src/config.ts`：
 
@@ -162,8 +169,9 @@ HOYO_EVENT_GENSHIN_REGION=cn_gf01
 ## 缓存与容错
 
 - 三款游戏并发抓取，每个请求有独立超时，整次调用有总超时。
-- 抓取成功后按游戏缓存筛选后的活动，默认缓存十分钟。
-- 缓存过期后重新抓取；抓取失败时回退到上次成功的结果，并在文本中说明结果可能不是最新。
+- 抓取成功后按游戏缓存筛选后的活动和正文，默认缓存十分钟。
+- 缓存过期后重新抓取；抓取失败时回退到上次成功的结果，并在 `warnings` 中说明结果可能不是最新。
+- 正文接口失败不影响活动列表：仍然返回标题和时间，`content` 为 `null`，并在 `warnings` 中说明；这种结果不参与缓存命中，下次调用会重新抓取。
 - 某款游戏失败且没有缓存时，结果中会保留其他游戏的数据，并列出失败原因。
 - 所有游戏都失败且没有缓存时，工具返回中文错误文本，不会让服务退出。
 - 网络错误、`retcode` 非 0、JSON 解析失败、数据结构缺失都会转成中文错误文本。
@@ -211,10 +219,10 @@ npm test
 
 - `src/index.ts`：stdio 入口、配置加载、启动和关闭处理。
 - `src/config.ts`：游戏配置、环境变量、公告地址组装。
-- `src/announcements.ts`：公告接口请求、超时、响应解析和 HTML 清理。
+- `src/announcements.ts`：公告列表和正文接口请求、超时、响应解析、HTML 转纯文本和图片提取。
 - `src/filter.ts`：各游戏筛选规则、通用排除词、活动名规范化和时间处理。
 - `src/service.ts`：三款游戏并发抓取、进程内缓存、失败回退和结果汇总。
-- `src/tools.ts`：`list_events` 的参数、中文文本和 `structuredContent`。
+- `src/tools.ts`：`list_events` 的参数、JSON 文本和 `structuredContent`。
 - `src/server.ts`：MCP 服务器组装。
 - `test/`：配置、筛选、抓取和端到端测试。
 - `vite.config.ts`：Vite 打包配置。

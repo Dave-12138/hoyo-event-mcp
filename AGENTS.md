@@ -5,8 +5,8 @@
 - 通过 stdio 提供 MCP 服务的米哈游活动查询工具，抓取原神、崩铁、绝区零的官方公告。
 - 运行时入口是 `src/index.ts`，构建后入口是 `dist/index.js`，`package.json` 的 `bin` 指向它。
 - 对外只暴露一个工具：`list_events`。
-- 工具返回中文文本和 `structuredContent`；默认只返回进行中的活动，`includeUpcoming` / `includeEnded` 扩展时间范围，`game` 限定游戏。
-- 三款游戏并发抓取，进程内缓存筛选结果，默认十分钟；刷新失败时回退到上次缓存并在文本中说明。
+- 工具返回 JSON 文本和 `structuredContent`，两者内容相同；每个活动带公告正文纯文本和正文图片地址。默认只返回进行中的活动，`includeUpcoming` / `includeEnded` 扩展时间范围，`game` 限定游戏。
+- 三款游戏并发抓取列表和正文，进程内缓存筛选结果，默认十分钟；刷新失败时回退到上次缓存，并在 `warnings` 中说明。
 - `.github/workflows/publish-dist.yml` 在推送到 `main` 后构建，并强制推送到孤儿分支 `dist`；`dist` 分支用于 `npx -y github:Dave-12138/hoyo-event-mcp#dist`。
 
 ## Commands
@@ -23,14 +23,14 @@
 
 ## Architecture
 
-- `src/config.ts`：定义三款游戏的接口地址、固定查询参数、可覆盖的 UID/等级/区域/平台/渠道，以及缓存和超时配置。
-- `src/announcements.ts`：请求公告接口，处理 HTTP 状态、`retcode`、JSON、`data.list` / `data.pic_list` 结构、单请求超时和 HTML 清理。
+- `src/config.ts`：定义三款游戏的列表和正文接口地址、固定查询参数、可覆盖的 UID/等级/区域/平台/渠道，以及缓存和超时配置。
+- `src/announcements.ts`：请求列表和正文接口，处理 HTTP 状态、`retcode`、JSON、`data.list` / `data.pic_list` 结构、单请求超时、HTML 转纯文本和图片提取。
 - `src/filter.ts`：按游戏规则和通用排除词筛选，限制活动期限为 90 天，规范化活动名，解析和格式化公告时间，按 `ann_id` 去重。
-- `src/service.ts`：并发抓取三款游戏，维护进程内缓存，失败时回退到上次快照，按查询参数过滤开始/结束状态并汇总结果。
-- `src/tools.ts`：`list_events` 的 Zod 参数、中文表格和 `structuredContent`。
+- `src/service.ts`：并发抓取三款游戏的列表和正文，按 `ann_id` 和标题匹配正文，维护进程内缓存，失败时回退到上次快照，按查询参数过滤开始/结束状态并汇总结果。
+- `src/tools.ts`：`list_events` 的 Zod 参数、JSON 文本和 `structuredContent`。
 - `src/server.ts`：创建 `McpServer` 并注册工具。
 - `src/index.ts`：加载配置、创建服务和 stdio 传输、处理退出信号。
-- `test/fixtures.mjs`：三款游戏的样例公告响应、按请求路径分发的本地 HTTP 服务，以及可切换的空结果、HTTP 500、`retcode`、结构缺失和慢响应模式。
+- `test/fixtures.mjs`：三款游戏的样例列表和正文响应、按请求路径分发的本地 HTTP 服务，以及可切换的空结果、HTTP 500、`retcode`、结构缺失和慢响应模式；列表和正文的错误模式分开配置。
 - `vite.config.ts`：把 `src/index.ts` 打包成单个 ESM 文件，保留 shebang，并把运行依赖和 Node 内置模块标记为外部依赖。
 
 ## Conventions
@@ -43,7 +43,10 @@
 - 接口返回的原始标题先去掉 HTML 标签，再参与关键词匹配；返回的 `title` 是去标签后的公告标题。
 - 活动名取标题中第一个 `「…」` 的内容；标题外的活动类后缀在提取前去掉。
 - `ann_id` 去重在最后统一执行，保留先出现的条目。
-- 缓存保存筛选后的每款游戏活动；开始/结束状态在每次工具调用时按当前时间计算。
+- 正文按 `ann_id` 和标题匹配；同一 `ann_id` 可能对应多条标题不同的公告，标题相同的那条才采用。
+- 正文图片单独放在 `images`，不内联到正文文本。
+- 缓存保存筛选后的每款游戏活动和正文；开始/结束状态在每次工具调用时按当前时间计算。
+- 正文获取失败的结果不参与缓存命中，下次调用会重新抓取。
 - `HOYO_EVENT_CACHE_TTL_MS=0` 表示不使用新鲜缓存，但抓取失败时仍会回退到上次成功结果。
 
 ## Pitfalls
@@ -55,6 +58,8 @@
 - `data.pic_list` 中 `title` 为空的是横幅条目，解析时直接跳过，不计入结构错误。
 - 崩铁 `data.list` 里的条目即使标题看起来像活动也不读取。
 - 绝区零 `福利活动` 标签的签到福利不取；`活动公告` 标签里的 `城募` 也不取。
+- 正文接口是同一根地址下的 `getAnnContent`，查询参数与列表接口相同。
+- 正文 HTML 中有以 `&lt;t …&gt;` 形式转义的标签，需要先解码实体再清理标签。
 - 总超时使用独立的 `AbortController`；任一游戏被取消后，服务会把该游戏记为失败并尝试回退缓存。
 - 测试中关闭 MCP 子进程可能延迟数秒，不要以进程立即退出作为通过条件。
 - 发布 `dist` 分支时，精简 `package.json` 不能包含 `prepack`、`prepare` 或 `devDependencies`，否则从 git 安装时会尝试构建。

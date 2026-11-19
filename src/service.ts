@@ -1,6 +1,6 @@
 import type { AppConfig, GameApiConfig, GameKey, GameName } from "./config.js";
 import { GAME_NAME_ORDER, GAME_NAME_TO_KEY } from "./config.js";
-import { fetchAnnouncements } from "./announcements.js";
+import { fetchAnnouncementContents, fetchAnnouncements, type AnnouncementContent } from "./announcements.js";
 import {
     daysLeft,
     dedupeByAnnId,
@@ -20,7 +20,14 @@ export interface EventsQuery {
     includeEnded: boolean;
 }
 
-export interface ListEvent extends EventRecord {
+export interface StoredEvent extends EventRecord {
+    /** 公告正文纯文本；没有取到正文时为 null。 */
+    content: string | null;
+    /** 正文中的图片地址。 */
+    images: string[];
+}
+
+export interface ListEvent extends StoredEvent {
     daysLeft: number;
     status: EventStatus;
 }
@@ -39,8 +46,10 @@ export interface ListEventsResult {
 }
 
 interface GameSnapshot {
-    events: EventRecord[];
+    events: StoredEvent[];
     fetchedAt: number;
+    /** 正文是否获取成功。正文失败的结果不参与缓存命中，下次调用会重新抓取。 */
+    complete: boolean;
 }
 
 interface GameOutcome {
@@ -124,14 +133,14 @@ export class EventService {
         const game = this.config.games[GAME_NAME_TO_KEY[name]];
         const cached = this.cache.get(game.key);
         const now = Date.now();
-        if (cached && now - cached.fetchedAt < this.config.cacheTtlMs) {
+        if (cached && cached.complete && now - cached.fetchedAt < this.config.cacheTtlMs) {
             return { game, snapshot: cached, stale: false };
         }
 
         try {
-            const snapshot = await this.refreshGame(game, signal);
+            const { snapshot, contentWarning } = await this.refreshGame(game, signal);
             this.cache.set(game.key, snapshot);
-            return { game, snapshot, stale: false };
+            return { game, snapshot, stale: false, warning: contentWarning };
         } catch (error) {
             const message = signal.aborted
                 ? `整体请求超时（${this.config.totalTimeoutMs} 毫秒）`
@@ -148,17 +157,70 @@ export class EventService {
         }
     }
 
-    private async refreshGame(game: GameApiConfig, signal: AbortSignal): Promise<GameSnapshot> {
-        const entries = await fetchAnnouncements(game, {
+    private async refreshGame(
+        game: GameApiConfig,
+        signal: AbortSignal
+    ): Promise<{ snapshot: GameSnapshot; contentWarning?: string }> {
+        const options = {
             requestTimeoutMs: this.config.requestTimeoutMs,
             signal,
             logger: this.logger
-        });
+        };
+
+        const contentPromise = fetchAnnouncementContents(game, options).then(
+            (contents) => ({ contents, error: undefined as unknown }),
+            (error: unknown) => ({ contents: [] as AnnouncementContent[], error })
+        );
+
+        const entries = await fetchAnnouncements(game, options);
+        const { contents, error } = await contentPromise;
+
         const events = selectGameEvents(game.key, entries, {
             timezoneOffsetHours: this.config.timezoneOffsetHours
         });
-        return { events, fetchedAt: Date.now() };
+        const index = indexContents(contents);
+        const stored: StoredEvent[] = events.map((event) => {
+            const content = index.get(contentKey(event.annId, event.title)) ?? index.get(annIdKey(event.annId));
+            return {
+                ...event,
+                content: content?.text ?? null,
+                images: content?.images ?? []
+            };
+        });
+
+        if (error !== undefined) {
+            const warning = `${game.name}公告正文获取失败：${errorMessage(error)}；本次只返回标题和时间。`;
+            this.logger.warn(warning);
+            return {
+                snapshot: { events: stored, fetchedAt: Date.now(), complete: false },
+                contentWarning: warning
+            };
+        }
+        return { snapshot: { events: stored, fetchedAt: Date.now(), complete: true } };
     }
+}
+
+function indexContents(contents: AnnouncementContent[]): Map<string, AnnouncementContent> {
+    const index = new Map<string, AnnouncementContent>();
+    for (const content of contents) {
+        const key = contentKey(content.annId, content.title);
+        if (!index.has(key)) {
+            index.set(key, content);
+        }
+        const fallback = annIdKey(content.annId);
+        if (!index.has(fallback)) {
+            index.set(fallback, content);
+        }
+    }
+    return index;
+}
+
+function contentKey(annId: number, title: string): string {
+    return `${annId}\u0000${title}`;
+}
+
+function annIdKey(annId: number): string {
+    return `id\u0000${annId}`;
 }
 
 function errorMessage(error: unknown): string {

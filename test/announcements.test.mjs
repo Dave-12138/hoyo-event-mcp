@@ -1,7 +1,7 @@
 import test, { after, before, describe } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../src/config.ts";
-import { fetchAnnouncements } from "../src/announcements.ts";
+import { fetchAnnouncementContents, fetchAnnouncements, htmlToText } from "../src/announcements.ts";
 import { startMockServer } from "./fixtures.mjs";
 
 function testLogger() {
@@ -62,6 +62,64 @@ describe("公告抓取", { concurrency: false }, () => {
         assert.ok(!hsr.some((entry) => entry.annId === 2099), "崩铁不应读取 data.list。");
         assert.ok(!hsr.some((entry) => entry.annId === 2098), "空标题条目应被跳过。");
         assert.deepEqual(logger.warnings, []);
+    });
+
+    test("解析公告正文并转成纯文本", async () => {
+        const logger = testLogger();
+        const genshin = await fetchAnnouncementContents(config.games.genshin, {
+            requestTimeoutMs: 2_000,
+            logger
+        });
+        const genshinKeep = genshin.find((content) => content.annId === 1001);
+        assert.ok(genshinKeep);
+        assert.equal(genshinKeep.title, "「星辉庆典」活动：完成挑战获取原石");
+        assert.match(genshinKeep.text, /在星辉庆典中完成挑战，获取原石。/);
+        assert.match(genshinKeep.text, /〓活动说明〓/);
+        assert.deepEqual(genshinKeep.images, ["https://example.com/genshin-1001-reward.png"]);
+
+        const hsr = await fetchAnnouncementContents(config.games.hsr, {
+            requestTimeoutMs: 2_000,
+            logger
+        });
+        const hsrKeep = hsr.find((content) => content.annId === 2001);
+        assert.ok(hsrKeep);
+        assert.match(hsrKeep.text, /^- 自塑尘脂$/m);
+        assert.match(hsrKeep.text, /^- 星琼$/m);
+
+        const zzz = await fetchAnnouncementContents(config.games.zzz, {
+            requestTimeoutMs: 2_000,
+            logger
+        });
+        const duplicates = zzz.filter((content) => content.annId === 3011);
+        assert.equal(duplicates.length, 2, "同一 ann_id 的不同标题都应保留，由标题匹配。");
+        assert.ok(duplicates.some((content) => content.text.includes("驱赶")));
+        assert.deepEqual(logger.warnings, []);
+    });
+
+    test("HTML 正文转换保留段落、列表和链接", () => {
+        const { text, images } = htmlToText(
+            '<p>第一段</p><p>第二段<br>换行</p><ul><li>条目一</li><li>条目二</li></ul><p><img src="https://example.com/a.png"><img src="https://example.com/a.png"></p><p><a href="https://example.com/page?x=1&amp;y=2">活动页面</a></p>'
+        );
+        assert.match(text, /第一段\n第二段\n换行/);
+        assert.match(text, /- 条目一\n- 条目二/);
+        assert.match(text, /活动页面（https:\/\/example\.com\/page\?x=1&y=2）/);
+        assert.ok(!text.includes("<"));
+        assert.deepEqual(images, ["https://example.com/a.png"]);
+    });
+
+    test("正文接口报错转为中文错误", async () => {
+        mock.state.contentModes.genshin = "error500";
+        try {
+            await assert.rejects(
+                fetchAnnouncementContents(config.games.genshin, {
+                    requestTimeoutMs: 2_000,
+                    logger: testLogger()
+                }),
+                (error) => error.message.includes("原神公告正文请求失败") && error.message.includes("HTTP 500")
+            );
+        } finally {
+            mock.state.contentModes.genshin = "normal";
+        }
     });
 
     test("retcode 非 0 转为中文错误", async () => {

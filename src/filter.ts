@@ -256,9 +256,9 @@ export function eventStatus(event: EventRecord, nowMs: number): EventStatus {
 }
 
 /** 按 ann_id 去重，保留先出现的条目。 */
-export function dedupeByAnnId(events: EventRecord[]): EventRecord[] {
+export function dedupeByAnnId<T extends EventRecord>(events: T[]): T[] {
     const seen = new Set<number>();
-    const result: EventRecord[] = [];
+    const result: T[] = [];
     for (const event of events) {
         if (seen.has(event.annId)) {
             continue;
@@ -276,7 +276,7 @@ const STATUS_ORDER: Record<EventStatus, number> = {
 };
 
 /** 按游戏、状态和结束时间排序；已结束的活动按结束时间倒序。 */
-export function sortEvents(events: EventRecord[], nowMs: number): EventRecord[] {
+export function sortEvents<T extends EventRecord>(events: T[], nowMs: number): T[] {
     return [...events].sort((left, right) => {
         const leftStatus = eventStatus(left, nowMs);
         const rightStatus = eventStatus(right, nowMs);

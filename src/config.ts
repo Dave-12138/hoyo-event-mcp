@@ -33,8 +33,10 @@ export interface GameApiConfig {
     name: GameName;
     /** 公告接口根地址，末尾不带斜杠。 */
     apiBase: string;
-    /** 公告接口路径，以斜杠开头。 */
+    /** 公告列表接口路径，以斜杠开头。 */
     apiPath: string;
+    /** 公告正文接口路径，以斜杠开头。 */
+    contentApiPath: string;
     /** 公告接口固定查询参数，用户 ID 等可变值也在这里组装。 */
     query: Readonly<Record<string, string>>;
 }
@@ -63,6 +65,7 @@ interface GameDefaults {
     name: GameName;
     apiBase: string;
     apiPath: string;
+    contentApiPath: string;
     query: {
         game: string;
         gameBiz: string;
@@ -81,6 +84,7 @@ const GAME_DEFAULTS: Record<GameKey, GameDefaults> = {
         name: GAME_NAMES.genshin,
         apiBase: "https://hk4e-ann-api.mihoyo.com",
         apiPath: "/common/hk4e_cn/announcement/api/getAnnList",
+        contentApiPath: "/common/hk4e_cn/announcement/api/getAnnContent",
         query: {
             game: "hk4e",
             gameBiz: "hk4e_cn",
@@ -97,6 +101,7 @@ const GAME_DEFAULTS: Record<GameKey, GameDefaults> = {
         name: GAME_NAMES.hsr,
         apiBase: "https://hkrpg-ann-api.mihoyo.com",
         apiPath: "/common/hkrpg_cn/announcement/api/getAnnList",
+        contentApiPath: "/common/hkrpg_cn/announcement/api/getAnnContent",
         query: {
             game: "hkrpg",
             gameBiz: "hkrpg_cn",
@@ -113,6 +118,7 @@ const GAME_DEFAULTS: Record<GameKey, GameDefaults> = {
         name: GAME_NAMES.zzz,
         apiBase: "https://announcement-api.mihoyo.com",
         apiPath: "/common/nap_cn/announcement/api/getAnnList",
+        contentApiPath: "/common/nap_cn/announcement/api/getAnnContent",
         query: {
             game: "nap",
             gameBiz: "nap_cn",
@@ -159,7 +165,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 }
 
 export function buildAnnouncementUrl(game: GameApiConfig): string {
-    const url = new URL(`${game.apiBase.replace(/\/+$/, "")}${game.apiPath}`);
+    return buildApiUrl(game, game.apiPath);
+}
+
+export function buildContentUrl(game: GameApiConfig): string {
+    return buildApiUrl(game, game.contentApiPath);
+}
+
+function buildApiUrl(game: GameApiConfig, apiPath: string): string {
+    const url = new URL(`${game.apiBase.replace(/\/+$/, "")}${apiPath}`);
     for (const [key, value] of Object.entries(game.query)) {
         url.searchParams.set(key, value);
     }
@@ -184,6 +198,7 @@ function loadGameConfig(
         name: defaults.name,
         apiBase: normalizeApiBase(apiBaseOverride ?? defaults.apiBase, "HOYO_EVENT_API_BASE"),
         apiPath: defaults.apiPath,
+        contentApiPath: defaults.contentApiPath,
         query: {
             game: defaults.query.game,
             game_biz: defaults.query.gameBiz,

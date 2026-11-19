@@ -105,14 +105,29 @@ describe("MCP 服务器", { concurrency: false }, () => {
         }
         assert.equal(events.filter((event) => event.annId === 3001).length, 1, "重复公告应去重。");
 
-        const expectedKeys = ["game", "name", "title", "startAt", "endAt", "daysLeft", "annId", "source"];
+        const expectedKeys = [
+            "game",
+            "name",
+            "title",
+            "startAt",
+            "endAt",
+            "daysLeft",
+            "status",
+            "annId",
+            "source",
+            "content",
+            "images"
+        ];
         for (const event of events) {
             assert.deepEqual(Object.keys(event).sort(), [...expectedKeys].sort());
             assert.match(event.startAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
             assert.match(event.endAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
             assert.ok(Number.isInteger(event.daysLeft));
             assert.ok(event.daysLeft > 0);
+            assert.equal(event.status, "active");
             assert.ok(event.source === "list" || event.source === "pic");
+            assert.ok(event.content === null || typeof event.content === "string");
+            assert.ok(Array.isArray(event.images));
         }
 
         const genshinKeep = events.find((event) => event.annId === 1001);
@@ -136,13 +151,19 @@ describe("MCP 服务器", { concurrency: false }, () => {
         assert.equal(zzzList.name, "修复吧！漂流画集");
         assert.equal(events.find((event) => event.annId === 3011)?.source, "pic");
 
+        assert.match(genshinKeep.content, /在星辉庆典中完成挑战/);
+        assert.deepEqual(genshinKeep.images, ["https://example.com/genshin-1001-reward.png"]);
+        const zzzPic = events.find((event) => event.annId === 3011);
+        assert.match(zzzPic.content, /驱赶/);
+        assert.doesNotMatch(zzzPic.content, /不应返回/, "正文应按标题匹配到同 ann_id 的正确条目。");
+
         const text = result.content[0].text;
-        assert.match(text, /共 6 个活动/);
-        assert.match(text, /原神（1）/);
-        assert.match(text, /崩铁（2）/);
-        assert.match(text, /绝区零（3）/);
-        assert.match(text, /数据获取时间/);
+        const payload = JSON.parse(text);
+        assert.deepEqual(payload, structured);
+        assert.equal(payload.total, 6);
+        assert.equal(payload.timezone, "UTC+8");
         assert.doesNotMatch(text, /灵圣纪行|差分宇宙|货币战争|七圣召唤/);
+        assert.ok(mock.state.requests.some((request) => request.pathname.endsWith("getAnnContent")));
 
         const stderr = stderrText();
         assert.match(stderr, /\[hoyo-event\] info 启动/);
@@ -157,7 +178,8 @@ describe("MCP 服务器", { concurrency: false }, () => {
         assert.equal(structured.total, 1);
         assert.deepEqual(structured.counts, { 原神: 1, 崩铁: 0, 绝区零: 0 });
         assert.ok(structured.events.every((event) => event.game === "原神"));
-        assert.doesNotMatch(result.content[0].text, /崩铁|绝区零/);
+        const payload = JSON.parse(result.content[0].text);
+        assert.deepEqual(payload.events, structured.events);
     });
 
     test("includeUpcoming 加入尚未开始的活动", async () => {
@@ -204,9 +226,11 @@ describe("MCP 服务器", { concurrency: false }, () => {
             assert.deepEqual(result.structuredContent.counts, { 原神: 0, 崩铁: 0, 绝区零: 0 });
             assert.equal(result.structuredContent.stale, false);
             const text = result.content[0].text;
-            assert.match(text, /三款游戏当前都没有符合条件的新活动/);
-            assert.match(text, /includeUpcoming/);
-            assert.match(text, /includeEnded/);
+            const payload = JSON.parse(text);
+            assert.deepEqual(payload.events, []);
+            assert.match(payload.message, /三款游戏当前都没有符合条件的新活动/);
+            assert.match(payload.message, /includeUpcoming/);
+            assert.match(payload.message, /includeEnded/);
 
             const single = await callEvents({ game: "绝区零" });
             assert.equal(single.isError, undefined, single.content?.[0]?.text);
@@ -301,13 +325,40 @@ describe("MCP 服务器", { concurrency: false }, () => {
             assert.equal(structured.warnings.length, 1);
             assert.match(structured.warnings[0], /原神刷新失败：原神公告请求失败：HTTP 500/);
             assert.ok(structured.events.every((event) => event.game === "崩铁" || event.game === "绝区零"));
-            const text = result.content[0].text;
-            assert.match(text, /原神（0）/);
-            assert.match(text, /数据获取失败/);
-            assert.match(text, /提示/);
+            const payload = JSON.parse(result.content[0].text);
+            assert.equal(payload.counts.原神, 0);
+            assert.deepEqual(payload.failedGames, ["原神"]);
+            assert.match(payload.warnings[0], /原神刷新失败/);
         } finally {
             await partialClient.close().catch(() => undefined);
             await partial.close();
+        }
+    });
+
+    test("正文抓取失败时仍返回活动并给出提示", async () => {
+        const contentFail = await startMockServer({ contentModes: { genshin: "error500" } });
+        const { client: contentClient } = await connectClient(
+            childEnv({
+                HOYO_EVENT_API_BASE: contentFail.baseUrl,
+                HOYO_EVENT_CACHE_TTL_MS: "0",
+                HOYO_EVENT_REQUEST_TIMEOUT_MS: "2000",
+                HOYO_EVENT_TOTAL_TIMEOUT_MS: "5000"
+            })
+        );
+        try {
+            const result = await contentClient.callTool({ name: "list_events", arguments: { game: "原神" } });
+            assert.equal(result.isError, undefined, result.content?.[0]?.text);
+            const structured = result.structuredContent;
+            assert.equal(structured.total, 1);
+            assert.equal(structured.events[0].content, null);
+            assert.deepEqual(structured.events[0].images, []);
+            assert.ok(
+                structured.warnings.some((warning) => warning.includes("原神公告正文获取失败")),
+                `警告中应包含正文失败原因：${structured.warnings.join("；")}`
+            );
+        } finally {
+            await contentClient.close().catch(() => undefined);
+            await contentFail.close();
         }
     });
 
