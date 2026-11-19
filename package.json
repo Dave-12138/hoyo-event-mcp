@@ -1,0 +1,20 @@
+{
+  "name": "hoyo-event",
+  "version": "0.1.0",
+  "description": "抓取米哈游官方公告并筛选限时玩法活动的 MCP 服务器",
+  "type": "module",
+  "bin": {
+    "hoyo-event": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "4.6.7"
+  }
+}
